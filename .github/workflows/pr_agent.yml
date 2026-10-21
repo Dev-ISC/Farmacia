@@ -20,8 +20,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
           OPENAI.API_BASE: ${{ secrets.OMNIROUTE_BASE_URL }}
-          config.model: "antigravity/gemini-3.8-flash-high"
-          config.fallback_models: '["antigravity/gemini-3.8-flash-high"]'
+          config.model: "openai/antigravity/gemini-3.8-flash-high"
+          config.fallback_models: '["openai/antigravity/gemini-3.8-flash-high"]'
+          config.custom_model_max_tokens: "64000"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
           github_action_config.auto_improve: "false"
