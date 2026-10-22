@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRealtimeStock } from "@/hooks/useRealtimeStock";
-import Catalogo from "@/componentesCatalogo/Catalogo";
 
 
 export default function Home() {
