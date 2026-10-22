@@ -5,6 +5,22 @@ import { useRouter } from 'next/navigation';
 import { account, tablesDB, APPWRITE_CONFIG, Query } from '@/lib/appwrite/client';
 import type { Usuario } from '@/types/database';
 
+/**
+ * Helper fuera del componente para escribir las cookies de sesión sin violar
+ * la regla `react-hooks/immutability` del compilador de React.
+ */
+function escribirCookiesSesion(usuarioId: string, rol: Usuario['rol']) {
+  if (typeof document === 'undefined') return;
+  document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax`;
+  document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax`;
+}
+
+function limpiarCookiesSesion() {
+  if (typeof document === 'undefined') return;
+  document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
+  document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
+}
+
 export default function Login() {
   const router = useRouter();
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -37,9 +53,8 @@ export default function Login() {
   }, []);
 
   // Guardar cookies y redirigir según el rol del usuario validado
-  const guardarCookiesYRedirigir = (valorSesion: string, usuario: Usuario) => {
-    document.cookie = `farmacia_session=${valorSesion}; path=/; max-age=86400; SameSite=Lax`;
-    document.cookie = `farmacia_rol=${usuario.rol}; path=/; max-age=86400; SameSite=Lax`;
+  const guardarCookiesYRedirigir = (usuario: Usuario) => {
+    escribirCookiesSesion(usuario.$id, usuario.rol);
 
     if (usuario.rol === 'admin') {
       router.push('/servidor');
@@ -48,7 +63,7 @@ export default function Login() {
     }
   };
 
-  // 2. Validar inicio de sesión por formulario (Appwrite Auth + Tabla Usuarios)
+  // 2. Validar inicio de sesión por formulario (Tabla Usuarios + Appwrite Auth)
   const manejarSubmitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorLogin(null);
@@ -62,24 +77,7 @@ export default function Login() {
     setValidando(true);
 
     try {
-      let secretSesion = '';
-
-      // Si ingresó contraseña, autenticamos la sesión en Appwrite Auth (`account`)
-      if (password.trim()) {
-        try {
-          await account.deleteSession({ sessionId: 'current' });
-        } catch {
-          // Ignorar si no había sesión previa activa
-        }
-
-        const sesionAppwrite = await account.createEmailPasswordSession({
-          email: correoLimpio,
-          password,
-        });
-        secretSesion = sesionAppwrite.secret || sesionAppwrite.$id;
-      }
-
-      // Validamos que el correo exista en la tabla `Usuarios` de Appwrite y obtenemos su rol
+      // Primero verificamos que el usuario exista en la tabla `Usuarios` sin destruir la sesión actual
       const resultado = await tablesDB.listRows<Usuario>({
         databaseId: APPWRITE_CONFIG.databaseId,
         tableId: APPWRITE_CONFIG.tables.usuarios,
@@ -93,11 +91,35 @@ export default function Login() {
         return;
       }
 
-      // Guardamos el secreto de sesión (o el $id del usuario) y su rol verificado
-      guardarCookiesYRedirigir(
-        secretSesion || usuarioEncontrado.$id,
-        usuarioEncontrado
-      );
+      // Si ingresó contraseña, autenticamos en Appwrite Auth manteniendo consistencia con la sesión
+      if (password.trim()) {
+        try {
+          await account.createEmailPasswordSession({
+            email: correoLimpio,
+            password,
+          });
+        } catch {
+          // Si ya existía una sesión previa activa en el navegador, la reemplazamos solo tras validar credenciales
+          try {
+            await account.deleteSession({ sessionId: 'current' });
+          } catch {
+            // Ignorar si no había sesión activa
+          }
+
+          try {
+            await account.createEmailPasswordSession({
+              email: correoLimpio,
+              password,
+            });
+          } catch (retryErr) {
+            limpiarCookiesSesion();
+            throw retryErr;
+          }
+        }
+      }
+
+      // En `farmacia_session` guardamos siempre el ID canónico del usuario (`usuarioEncontrado.$id`)
+      guardarCookiesYRedirigir(usuarioEncontrado);
     } catch (err) {
       const mensaje =
         err instanceof Error
@@ -111,15 +133,18 @@ export default function Login() {
 
   // 3. Selección rápida desde las tarjetas de usuario
   const iniciarSesionConPerfil = (usuario: Usuario) => {
-    guardarCookiesYRedirigir(usuario.$id, usuario);
+    guardarCookiesYRedirigir(usuario);
   };
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 px-4 py-12">
       <div className="text-center mb-8">
         <h1 className="text-4xl font-bold text-white mb-3">
-          Farmacia Doc.Peralito
+          Farmacia Doctor Simi
         </h1>
+        <h2 className="text-2xl font-semibold text-zinc-300 mb-2">
+          Bienvenido a la Plataforma de Farmacia
+        </h2>
         <p className="text-zinc-400 text-lg">
           Inicia sesión o selecciona tu perfil
         </p>
