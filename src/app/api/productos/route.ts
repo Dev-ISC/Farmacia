@@ -176,6 +176,20 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (
+            error !== null &&
+            typeof error === 'object' &&
+            'code' in error &&
+            error.code === 409 &&
+            'type' in error &&
+            error.type === 'row_unique_constraint_violation'
+        ) {
+            return NextResponse.json(
+                { error: 'Ya existe un producto con ese SKU' },
+                { status: 409 }
+            );
+        }
+
         console.error('Error al registrar producto:', error);
 
         return NextResponse.json(
