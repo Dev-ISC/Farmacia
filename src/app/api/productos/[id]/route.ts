@@ -127,6 +127,18 @@ export async function PATCH(
             producto,
         });
     } catch (error) {
+        if (
+            error !== null &&
+            typeof error === 'object' &&
+            'code' in error &&
+            error.code === 404
+        ) {
+            return NextResponse.json(
+                { error: 'Producto no encontrado' },
+                { status: 404 }
+            );
+        }
+
         console.error('Error actualizando producto:', error);
 
         return NextResponse.json(
