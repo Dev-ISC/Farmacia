@@ -9,8 +9,6 @@ export default function Home() {
   const [resultado, setResultado] = useState<string | null>(null);
   const [procesando, setProcesando] = useState(false);
 
-    const [procesando, setProcesando] = useState(false);
-
   const handleApiTest = async () => {
     setProcesando(true);
     setResultado(null);
