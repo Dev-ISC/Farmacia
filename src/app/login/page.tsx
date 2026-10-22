@@ -52,7 +52,7 @@ export default function Login() {
     cargarUsuarios();
   }, []);
 
-  // Guardar cookies y redirigir según el rol del usuario validado
+  // Guardar cookies y redirigir únicamente después de verificar credenciales
   const guardarCookiesYRedirigir = (usuario: Usuario) => {
     escribirCookiesSesion(usuario.$id, usuario.rol);
 
@@ -74,6 +74,11 @@ export default function Login() {
       return;
     }
 
+    if (!password.trim()) {
+      setErrorLogin('Por favor ingresa tu contraseña.');
+      return;
+    }
+
     setValidando(true);
 
     try {
@@ -91,34 +96,32 @@ export default function Login() {
         return;
       }
 
-      // Si ingresó contraseña, autenticamos en Appwrite Auth manteniendo consistencia con la sesión
-      if (password.trim()) {
+      // Autenticamos obligatoriamente en Appwrite Auth antes de emitir cookies
+      try {
+        await account.createEmailPasswordSession({
+          email: correoLimpio,
+          password,
+        });
+      } catch {
+        // Si ya existía una sesión previa activa en el navegador, la reemplazamos solo si las credenciales son válidas
+        try {
+          await account.deleteSession({ sessionId: 'current' });
+        } catch {
+          // Ignorar si no había sesión activa
+        }
+
         try {
           await account.createEmailPasswordSession({
             email: correoLimpio,
             password,
           });
-        } catch {
-          // Si ya existía una sesión previa activa en el navegador, la reemplazamos solo tras validar credenciales
-          try {
-            await account.deleteSession({ sessionId: 'current' });
-          } catch {
-            // Ignorar si no había sesión activa
-          }
-
-          try {
-            await account.createEmailPasswordSession({
-              email: correoLimpio,
-              password,
-            });
-          } catch (retryErr) {
-            limpiarCookiesSesion();
-            throw retryErr;
-          }
+        } catch (retryErr) {
+          limpiarCookiesSesion();
+          throw retryErr;
         }
       }
 
-      // En `farmacia_session` guardamos siempre el ID canónico del usuario (`usuarioEncontrado.$id`)
+      // Emitir `farmacia_session` y `farmacia_rol` solo tras autenticar con éxito
       guardarCookiesYRedirigir(usuarioEncontrado);
     } catch (err) {
       const mensaje =
@@ -131,9 +134,10 @@ export default function Login() {
     }
   };
 
-  // 3. Selección rápida desde las tarjetas de usuario
-  const iniciarSesionConPerfil = (usuario: Usuario) => {
-    guardarCookiesYRedirigir(usuario);
+  // 3. Seleccionar un perfil solo autocompleta su correo (requiere contraseña para iniciar sesión)
+  const seleccionarPerfil = (usuario: Usuario) => {
+    setEmail(usuario.email);
+    setErrorLogin(null);
   };
 
   return (
@@ -178,6 +182,7 @@ export default function Login() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
+            required
             className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-4 py-2.5 text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
           />
         </div>
@@ -197,7 +202,7 @@ export default function Login() {
         </button>
       </form>
 
-      {/* Grid de Perfiles obtenidos desde Appwrite */}
+      {/* Grid de Perfiles obtenidos desde Appwrite (autocompleta el correo al hacer clic) */}
       {cargando ? (
         <p className="text-zinc-400">Cargando usuarios...</p>
       ) : (
@@ -206,7 +211,7 @@ export default function Login() {
             <button
               key={usuario.$id}
               type="button"
-              onClick={() => iniciarSesionConPerfil(usuario)}
+              onClick={() => seleccionarPerfil(usuario)}
               className="group flex flex-col items-center gap-4 p-6 bg-zinc-900 border border-zinc-800 rounded-2xl hover:bg-zinc-800 hover:border-blue-500 transition-all duration-300 transform hover:-translate-y-2 cursor-pointer"
             >
               {/* Avatar circular con la inicial del nombre */}
