@@ -1,238 +1,341 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { account, tablesDB, APPWRITE_CONFIG, Query } from '@/lib/appwrite/client';
 import type { Usuario } from '@/types/database';
 
-/**
- * Helper fuera del componente para escribir las cookies de sesión sin violar
- * la regla `react-hooks/immutability` del compilador de React.
- */
-function escribirCookiesSesion(usuarioId: string, rol: Usuario['rol']) {
+const DEFAULT_DEMO_PASSWORD = 'Farmacia123!';
+
+interface SesionActivaInfo {
+  $id: string;
+  name: string;
+  email: string;
+  rol: 'admin' | 'cliente';
+}
+
+function sincronizarCookieParaMiddleware(usuarioId: string, rol: 'admin' | 'cliente') {
   if (typeof document === 'undefined') return;
   document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax`;
   document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax`;
 }
 
-function limpiarCookiesSesion() {
+function limpiarCookieDeMiddleware() {
   if (typeof document === 'undefined') return;
   document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
   document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
 }
 
-export default function Login() {
+function ContenidoLogin() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectParam = searchParams.get('redirect');
+
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [cargando, setCargando] = useState<boolean>(true);
+  const [usuarioActivo, setUsuarioActivo] = useState<SesionActivaInfo | null>(null);
 
-  // Estados para validación de login por correo y contraseña
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const [validando, setValidando] = useState<boolean>(false);
+  const [procesando, setProcesando] = useState<boolean>(false);
   const [errorLogin, setErrorLogin] = useState<string | null>(null);
 
-  // 1. Obtener la lista de usuarios desde la tabla `Usuarios` en Appwrite (TablesDB)
   useEffect(() => {
-    const cargarUsuarios = async () => {
-      try {
-        const respuesta = await tablesDB.listRows<Usuario>({
-          databaseId: APPWRITE_CONFIG.databaseId,
-          tableId: APPWRITE_CONFIG.tables.usuarios,
-          queries: [Query.limit(50)],
-        });
-        setUsuarios(respuesta.rows);
-      } catch (error) {
-        console.error('Error al cargar usuarios desde Appwrite:', error);
-      } finally {
-        setCargando(false);
-      }
-    };
+    let cancelado = false;
 
-    cargarUsuarios();
-  }, []);
-
-  // Guardar cookies y redirigir únicamente después de verificar credenciales
-  const guardarCookiesYRedirigir = (usuario: Usuario) => {
-    escribirCookiesSesion(usuario.$id, usuario.rol);
-
-    if (usuario.rol === 'admin') {
-      router.push('/servidor');
-    } else {
-      router.push('/cliente');
-    }
-  };
-
-  // 2. Validar inicio de sesión por formulario (Tabla Usuarios + Appwrite Auth)
-  const manejarSubmitLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorLogin(null);
-
-    const correoLimpio = email.trim().toLowerCase();
-    if (!correoLimpio) {
-      setErrorLogin('Por favor ingresa tu correo electrónico.');
-      return;
-    }
-
-    if (!password.trim()) {
-      setErrorLogin('Por favor ingresa tu contraseña.');
-      return;
-    }
-
-    setValidando(true);
-
-    try {
-      // Primero verificamos que el usuario exista en la tabla `Usuarios` sin destruir la sesión actual
-      const resultado = await tablesDB.listRows<Usuario>({
+    tablesDB
+      .listRows<Usuario>({
         databaseId: APPWRITE_CONFIG.databaseId,
         tableId: APPWRITE_CONFIG.tables.usuarios,
-        queries: [Query.equal('email', correoLimpio), Query.limit(1)],
+        queries: [Query.limit(50)],
+      })
+      .then((respuesta) => {
+        if (!cancelado) setUsuarios(respuesta.rows);
+      })
+      .catch((error) => {
+        if (!cancelado) console.error('Error al cargar usuarios:', error);
+      })
+      .finally(() => {
+        if (!cancelado) setCargando(false);
       });
 
-      const usuarioEncontrado = resultado.rows[0];
+    account
+      .get()
+      .then((user) => {
+        if (!cancelado) {
+          const esAdmin = Array.isArray(user.labels) && user.labels.includes('admin');
+          const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
+          setUsuarioActivo({
+            $id: user.$id,
+            name: user.name,
+            email: user.email,
+            rol,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelado) setUsuarioActivo(null);
+      });
 
-      if (!usuarioEncontrado) {
-        setErrorLogin('El usuario no existe en la tabla Usuarios de la farmacia.');
-        return;
-      }
+    return () => {
+      cancelado = true;
+    };
+  }, []);
 
-      // Autenticamos obligatoriamente en Appwrite Auth antes de emitir cookies
+  const autenticarConAppwrite = async (correo: string, contrasena: string) => {
+    setErrorLogin(null);
+    setProcesando(true);
+
+    try {
       try {
         await account.createEmailPasswordSession({
-          email: correoLimpio,
-          password,
+          email: correo,
+          password: contrasena,
         });
-      } catch {
-        // Si ya existía una sesión previa activa en el navegador, la reemplazamos solo si las credenciales son válidas
-        try {
-          await account.deleteSession({ sessionId: 'current' });
-        } catch {
-          // Ignorar si no había sesión activa
-        }
-
-        try {
+      } catch (err: unknown) {
+        const mensajeError = err instanceof Error ? err.message.toLowerCase() : '';
+        if (
+          mensajeError.includes('session is active') ||
+          mensajeError.includes('already exists')
+        ) {
+          try {
+            await account.deleteSession({ sessionId: 'current' });
+          } catch {
+            // Ignorar
+          }
           await account.createEmailPasswordSession({
-            email: correoLimpio,
-            password,
+            email: correo,
+            password: contrasena,
           });
-        } catch (retryErr) {
-          limpiarCookiesSesion();
-          throw retryErr;
+        } else {
+          throw err;
         }
       }
 
-      // Emitir `farmacia_session` y `farmacia_rol` solo tras autenticar con éxito
-      guardarCookiesYRedirigir(usuarioEncontrado);
+      const authUser = await account.get();
+      const esAdmin = Array.isArray(authUser.labels) && authUser.labels.includes('admin');
+      const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
+
+      setUsuarioActivo({
+        $id: authUser.$id,
+        name: authUser.name,
+        email: authUser.email,
+        rol,
+      });
+
+      sincronizarCookieParaMiddleware(authUser.$id, rol);
+
+      if (redirectParam) {
+        router.push(redirectParam);
+      } else if (rol === 'admin') {
+        router.push('/servidor');
+      } else {
+        router.push('/cliente');
+      }
     } catch (err) {
+      console.error('Error en autenticación Appwrite Auth:', err);
       const mensaje =
         err instanceof Error
           ? err.message
-          : 'Credenciales inválidas o error al validar con Appwrite.';
+          : 'Credenciales inválidas o error de conexión.';
       setErrorLogin(mensaje);
     } finally {
-      setValidando(false);
+      setProcesando(false);
     }
   };
 
-  // 3. Seleccionar un perfil solo autocompleta su correo (requiere contraseña para iniciar sesión)
-  const seleccionarPerfil = (usuario: Usuario) => {
+  const cerrarSesion = async () => {
+    try {
+      await account.deleteSession({ sessionId: 'current' });
+    } catch {
+      // Ignorar
+    }
+    limpiarCookieDeMiddleware();
+    setUsuarioActivo(null);
+  };
+
+  const manejarSubmitManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const correoLimpio = email.trim().toLowerCase();
+    if (!correoLimpio || !password.trim()) {
+      setErrorLogin('Por favor ingresa tu correo y contraseña.');
+      return;
+    }
+    await autenticarConAppwrite(correoLimpio, password);
+  };
+
+  const loginRapido = async (usuario: Usuario) => {
     setEmail(usuario.email);
-    setErrorLogin(null);
+    setPassword(DEFAULT_DEMO_PASSWORD);
+    await autenticarConAppwrite(usuario.email, DEFAULT_DEMO_PASSWORD);
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 px-4 py-12">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-white mb-3">
-          Farmacia Doctor Simi
-        </h1>
-        <h2 className="text-2xl font-semibold text-zinc-300 mb-2">
-          Bienvenido a la Plataforma de Farmacia
-        </h2>
-        <p className="text-zinc-400 text-lg">
-          Inicia sesión o selecciona tu perfil
-        </p>
-      </div>
-
-      {/* Formulario de Validación de Usuario (Appwrite Auth + Tabla Usuarios) */}
-      <form
-        onSubmit={manejarSubmitLogin}
-        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 mb-10 space-y-4 shadow-xl"
-      >
-        <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">
-            Correo electrónico
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="ejemplo@farmacia.com"
-            required
-            className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-4 py-2.5 text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">
-            Contraseña
-          </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            required
-            className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-4 py-2.5 text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
-          />
-        </div>
-
-        {errorLogin && (
-          <p className="text-sm text-red-400 bg-red-950/50 border border-red-800 rounded-lg p-3">
-            {errorLogin}
+    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 font-sans dark:bg-black px-4 py-16">
+      <main className="w-full max-w-4xl flex flex-col items-center sm:items-start bg-white dark:bg-black border border-black/[.08] dark:border-white/[.145] rounded-3xl p-8 sm:p-12 shadow-xs">
+        {/* Cabecera estilo Vercel */}
+        <div className="flex flex-col gap-2 mb-8 text-center sm:text-left w-full">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Farmacia &bull; Autenticación
+            </span>
+            {usuarioActivo && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-mono text-zinc-600 dark:text-zinc-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                Conectado como {usuarioActivo.name}
+              </span>
+            )}
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-black dark:text-zinc-50">
+            Iniciar Sesión
+          </h1>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Selecciona tu perfil o ingresa tus credenciales.
           </p>
+        </div>
+
+        {/* Banner de sesión activa */}
+        {usuarioActivo && (
+          <div className="w-full flex items-center justify-between p-3.5 mb-8 rounded-xl border border-black/[.08] dark:border-white/[.145] bg-black/[.02] dark:bg-white/[.03] text-sm">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-black dark:text-white">
+                {usuarioActivo.name}
+              </span>
+              <span className="text-xs font-mono text-zinc-500">
+                ({usuarioActivo.email})
+              </span>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-zinc-300 dark:border-zinc-700 bg-zinc-100/80 dark:bg-zinc-800/80 text-[10px] font-mono font-medium uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                {usuarioActivo.rol}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void cerrarSesion()}
+              className="text-xs text-zinc-500 hover:text-black dark:hover:text-white transition-colors cursor-pointer underline underline-offset-4"
+            >
+              Cerrar sesión
+            </button>
+          </div>
         )}
 
-        <button
-          type="submit"
-          disabled={validando}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors cursor-pointer"
-        >
-          {validando ? 'Validando usuario...' : 'Iniciar Sesión'}
-        </button>
-      </form>
+        {/* Selector Rápido de Usuarios (Cards estilo Vercel) */}
+        <div className="w-full mb-10">
+          <h2 className="text-xs font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-3">
+            Selección Rápida de Perfiles:
+          </h2>
 
-      {/* Grid de Perfiles obtenidos desde Appwrite (autocompleta el correo al hacer clic) */}
-      {cargando ? (
-        <p className="text-zinc-400">Cargando usuarios...</p>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 max-w-3xl w-full">
-          {usuarios.map((usuario) => (
-            <button
-              key={usuario.$id}
-              type="button"
-              onClick={() => seleccionarPerfil(usuario)}
-              className="group flex flex-col items-center gap-4 p-6 bg-zinc-900 border border-zinc-800 rounded-2xl hover:bg-zinc-800 hover:border-blue-500 transition-all duration-300 transform hover:-translate-y-2 cursor-pointer"
-            >
-              {/* Avatar circular con la inicial del nombre */}
-              <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold text-white shadow-lg group-hover:scale-110 transition-transform">
-                {usuario.nombre.charAt(0).toUpperCase()}
-              </div>
+          {cargando ? (
+            <div className="p-8 text-center text-xs font-mono text-zinc-400">
+              Cargando perfiles...
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {usuarios.map((usuario) => {
+                const esActivo = usuario.$id === usuarioActivo?.$id;
 
-              <div className="text-center">
-                <h2 className="text-xl font-semibold text-zinc-300 group-hover:text-white transition-colors">
-                  {usuario.nombre}
-                </h2>
-                <p className="text-xs text-zinc-500 mt-1">{usuario.email}</p>
-              </div>
+                return (
+                  <button
+                    key={usuario.$id}
+                    type="button"
+                    disabled={procesando}
+                    onClick={() => void loginRapido(usuario)}
+                    className={`flex flex-col justify-between p-4 rounded-xl border text-left transition-colors cursor-pointer disabled:opacity-50 ${
+                      esActivo
+                        ? 'border-black dark:border-white bg-black/[.04] dark:bg-white/[.06]'
+                        : 'border-black/[.08] dark:border-white/[.145] hover:border-black/[.3] dark:hover:border-white/[.3] hover:bg-black/[.02] dark:hover:bg-white/[.02]'
+                    }`}
+                  >
+                    <div>
+                      <div className="w-8 h-8 rounded-full border border-black/[.08] dark:border-white/[.145] flex items-center justify-center font-mono text-xs font-medium text-black dark:text-white bg-black/[.03] dark:bg-white/[.05] mb-3">
+                        {usuario.nombre.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="text-sm font-semibold tracking-tight text-black dark:text-zinc-100 truncate">
+                        {usuario.nombre}
+                      </div>
+                      <div className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 truncate mt-0.5">
+                        {usuario.email}
+                      </div>
+                    </div>
 
-              <span className="text-xs text-zinc-500 bg-zinc-950 px-3 py-1 rounded-full uppercase tracking-wider">
-                {usuario.rol}
-              </span>
-            </button>
-          ))}
+                    <div className="mt-4 flex items-center justify-between">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-zinc-300 dark:border-zinc-700 bg-zinc-100/80 dark:bg-zinc-800/80 text-[10px] font-mono font-medium uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                        {usuario.rol}
+                      </span>
+                      {esActivo && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
-      )}
-    </main>
+
+        {/* Formulario Manual estilo Vercel */}
+        <div className="w-full max-w-md pt-6 border-t border-black/[.08] dark:border-white/[.145]">
+          <h3 className="text-sm font-medium tracking-tight text-black dark:text-zinc-100 mb-1">
+            O inicia con credenciales
+          </h3>
+          <p className="text-xs text-zinc-500 mb-4">
+            Ingresa tu correo electrónico y contraseña.
+          </p>
+
+          <form onSubmit={manejarSubmitManual} className="flex flex-col gap-3">
+            <div>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="correo@farmacia.com"
+                required
+                className="w-full h-10 rounded-lg border border-solid border-black/[.08] dark:border-white/[.145] bg-transparent px-3 text-sm text-black dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-colors"
+              />
+            </div>
+
+            <div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Contraseña"
+                required
+                className="w-full h-10 rounded-lg border border-solid border-black/[.08] dark:border-white/[.145] bg-transparent px-3 text-sm text-black dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-colors"
+              />
+            </div>
+
+            {errorLogin && (
+              <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/[.05] text-xs font-mono text-red-600 dark:text-red-400">
+                {errorLogin}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="submit"
+                disabled={procesando}
+                className="flex h-10 flex-1 cursor-pointer items-center justify-center rounded-full bg-black text-white hover:bg-[#383838] dark:bg-white dark:text-black dark:hover:bg-[#ccc] text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {procesando ? 'Verificando...' : 'Iniciar Sesión'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default function Login() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-black font-mono text-xs text-zinc-500">
+          Cargando sesión...
+        </div>
+      }
+    >
+      <ContenidoLogin />
+    </Suspense>
   );
 }

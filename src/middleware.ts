@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import type { RolUsuario } from './src/types/database';
+import type { RolUsuario } from '@/types/database';
 
 /**
  * Constantes de nombres de cookies para autenticación y control de acceso.
@@ -66,7 +66,7 @@ function obtenerRolUsuario(request: NextRequest): RolUsuario | undefined {
  * 2. Protege `/cliente/carrito/:path*` validando sesión activa.
  *    - Si no hay sesión -> redirige a `/login`.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const sesion = obtenerSesionActiva(request);
   const rol = obtenerRolUsuario(request);
@@ -86,8 +86,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2. Protección del Carrito en la Interfaz Cliente (/cliente/carrito y subrutas)
-  if (pathname.startsWith('/cliente/carrito')) {
+  // 2. Protección de la Interfaz Cliente (/cliente y subrutas como /cliente/carrito)
+  if (pathname.startsWith('/cliente')) {
     if (!sesion) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
@@ -104,8 +104,13 @@ export function middleware(request: NextRequest) {
  * En Next.js 16, la convención `middleware` también puede exportarse como `proxy`.
  * Exportamos ambos para máxima compatibilidad.
  */
-export const proxy = middleware;
+export const middleware = proxy;
 
 export const config = {
-  matcher: ['/servidor/:path*', '/cliente/carrito/:path*'],
+  matcher: [
+    '/servidor',
+    '/servidor/:path*',
+    '/cliente',
+    '/cliente/:path*',
+  ],
 };
