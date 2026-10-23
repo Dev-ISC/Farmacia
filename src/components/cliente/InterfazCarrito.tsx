@@ -53,11 +53,20 @@ let carritoCacheParsed: EntradaCarritoItem[] = [];
 
 function obtenerSnapshotCarrito(): EntradaCarritoItem[] {
   if (typeof window === 'undefined') return [];
-  const raw = localStorage.getItem('farmacia_cart') || '[]';
+  let raw = '[]';
+  try {
+    raw = localStorage.getItem('farmacia_cart') || '[]';
+  } catch (err) {
+    console.warn('No se pudo leer farmacia_cart:', err);
+    return SERVER_EMPTY_CART;
+  }
   if (raw !== carritoCacheRaw) {
     carritoCacheRaw = raw;
     try {
-      carritoCacheParsed = JSON.parse(raw);
+      const parsed: unknown = JSON.parse(raw);
+      carritoCacheParsed = Array.isArray(parsed)
+        ? (parsed as EntradaCarritoItem[])
+        : [];
     } catch {
       carritoCacheParsed = [];
     }
