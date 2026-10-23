@@ -63,7 +63,7 @@ function obtenerRolUsuario(request: NextRequest): RolUsuario | undefined {
  * 1. Protege `/servidor/:path*` validando sesión activa y rol `'admin'`.
  *    - Si no hay sesión -> redirige a `/login`.
  *    - Si el rol es `'cliente'` (o distinto de `'admin'`) -> redirige a `/cliente`.
- * 2. Protege `/cliente/carrito/:path*` validando sesión activa.
+ * 2. Protege `/cliente/:path*` validando sesión activa.
  *    - Si no hay sesión -> redirige a `/login`.
  */
 export function proxy(request: NextRequest) {

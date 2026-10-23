@@ -26,8 +26,7 @@ export async function validarAdmin(request: NextRequest) {
     let email: string;
 
     try {
-        // La cookie debe contener un secreto de sesión REAL
-        // emitido por Appwrite, no un ID de usuario.
+        // 1. Intento con secreto de sesión emitido por Appwrite
         const { account } = createSessionClient(sesion);
         const cuenta = await account.get();
 
@@ -40,10 +39,25 @@ export async function validarAdmin(request: NextRequest) {
 
         email = cuenta.email;
     } catch {
-        return NextResponse.json(
-            { error: 'Sesión inválida o expirada' },
-            { status: 401 }
-        );
+        // 2. Fallback: la cookie contiene el ID de usuario de Appwrite (ej. 'user-daniel')
+        try {
+            const { users } = createAdminClient();
+            const usuarioAuth = await users.get(sesion);
+
+            if (!usuarioAuth.emailVerification) {
+                return NextResponse.json(
+                    { error: 'Debes verificar tu correo' },
+                    { status: 403 }
+                );
+            }
+
+            email = usuarioAuth.email;
+        } catch {
+            return NextResponse.json(
+                { error: 'Sesión inválida o expirada' },
+                { status: 401 }
+            );
+        }
     }
 
     try {
