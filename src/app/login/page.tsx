@@ -125,8 +125,15 @@ function ContenidoLogin() {
 
       sincronizarCookieParaMiddleware(authUser.$id, rol);
 
-      if (redirectParam) {
-        router.push(redirectParam);
+      const destinoSeguro =
+        redirectParam &&
+        redirectParam.startsWith('/') &&
+        !redirectParam.startsWith('//') &&
+        !redirectParam.startsWith('/\\')
+          ? redirectParam
+          : null;
+      if (destinoSeguro) {
+        router.push(destinoSeguro);
       } else if (rol === 'admin') {
         router.push('/servidor');
       } else {
