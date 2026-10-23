@@ -26,8 +26,6 @@ export async function validarAdmin(request: NextRequest) {
     let email: string;
 
     try {
-        // La cookie debe contener un secreto de sesión REAL
-        // emitido por Appwrite, no un ID de usuario.
         const { account } = createSessionClient(sesion);
         const cuenta = await account.get();
 

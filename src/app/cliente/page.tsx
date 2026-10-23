@@ -12,10 +12,19 @@ import InterfazCarrito, {
 } from '@/components/cliente/InterfazCarrito';
 import type { Producto } from '@/types/database';
 
+interface CategoriaOpcion {
+  id: string;
+  nombre: string | null;
+}
+
 export default function PaginaCliente() {
   const router = useRouter();
   const [usuario, setUsuario] = useState<{ name: string; email: string } | null>(null);
   const [agregadoId, setAgregadoId] = useState<string | null>(null);
+  const [busqueda, setBusqueda] = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState('Todas');
+  const [categorias, setCategorias] = useState<CategoriaOpcion[]>([]);
+
   const { productos, stockPorId, cargando, conectadoRealtime } = useRealtimeStock({ soloActivos: true });
 
   useEffect(() => {
@@ -24,6 +33,17 @@ export default function PaginaCliente() {
       .then((u) => setUsuario({ name: u.name, email: u.email }))
       .catch(() => {
         // Si no hay sesión, middleware o página lo redirige
+      });
+
+    fetch('/api/categorias')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.categorias && Array.isArray(data.categorias)) {
+          setCategorias(data.categorias);
+        }
+      })
+      .catch(() => {
+        // Ignorar
       });
   }, []);
 
@@ -72,12 +92,33 @@ export default function PaginaCliente() {
     setTimeout(() => setAgregadoId(null), 1200);
   };
 
+  // Filtrado reactivo en tiempo real
+  const productosFiltrados = productos.filter((prod) => {
+    const termino = busqueda.toLowerCase().trim();
+    const coincideBusqueda =
+      !termino ||
+      prod.nombre.toLowerCase().includes(termino) ||
+      (prod.sku && prod.sku.toLowerCase().includes(termino));
+
+    const catId =
+      typeof prod.categoria === 'string'
+        ? prod.categoria
+        : prod.categoria && typeof prod.categoria === 'object' && '$id' in prod.categoria
+        ? (prod.categoria as { $id: string }).$id
+        : null;
+
+    const coincideCategoria =
+      categoriaFiltro === 'Todas' || catId === categoriaFiltro;
+
+    return coincideBusqueda && coincideCategoria;
+  });
+
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 font-sans dark:bg-black text-black dark:text-zinc-50">
       {/* Barra superior estilo Vercel */}
       <header className="w-full border-b border-black/[.08] dark:border-white/[.145] bg-white dark:bg-black px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/cliente" className="font-semibold tracking-tight text-lg">
+          <Link href="/" className="font-semibold tracking-tight text-lg">
             Farmacia
           </Link>
           <span className="text-xs font-mono text-zinc-400 dark:text-zinc-500">
@@ -126,18 +167,57 @@ export default function PaginaCliente() {
           </Link>
         </div>
 
+        {/* Buscador y Filtro por Categoría */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder="Buscar por medicamento o SKU..."
+              aria-label="Buscar medicamento"
+              className="w-full h-10 px-4 rounded-full border border-black/[.08] dark:border-white/[.145] bg-white dark:bg-zinc-950 text-sm focus:outline-none focus:border-black dark:focus:border-white transition-colors"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+            />
+            {busqueda && (
+              <button
+                type="button"
+                onClick={() => setBusqueda('')}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-mono text-zinc-400 hover:text-black dark:hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <select
+            aria-label="Filtrar por categoría"
+            className="h-10 px-4 rounded-full border border-black/[.08] dark:border-white/[.145] bg-white dark:bg-zinc-950 text-xs font-mono focus:outline-none focus:border-black dark:focus:border-white transition-colors cursor-pointer"
+            value={categoriaFiltro}
+            onChange={(e) => setCategoriaFiltro(e.target.value)}
+          >
+            <option value="Todas">Todas las categorías</option>
+            {categorias.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.nombre || cat.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Grid de Productos con Stock en Vivo */}
         {cargando ? (
           <div className="py-20 text-center font-mono text-xs text-zinc-400">
             Cargando catálogo en vivo...
           </div>
-        ) : productos.length === 0 ? (
+        ) : productosFiltrados.length === 0 ? (
           <div className="py-20 text-center font-mono text-xs text-zinc-400 border border-dashed border-black/[.08] dark:border-white/[.145] rounded-2xl">
-            No hay medicamentos disponibles en este momento.
+            {busqueda || categoriaFiltro !== 'Todas'
+              ? 'No se encontraron medicamentos para los filtros seleccionados.'
+              : 'No hay medicamentos disponibles en este momento.'}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {productos.map((prod) => {
+            {productosFiltrados.map((prod) => {
               const stockActual = stockPorId[prod.$id] ?? prod.stock;
               const agotado = stockActual <= 0;
 
