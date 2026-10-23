@@ -37,6 +37,7 @@ export default function PaginaCliente() {
       document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
       document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
     }
+    guardarCarritoLocal([]);
     router.push('/login');
   };
 
