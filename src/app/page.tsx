@@ -35,8 +35,9 @@ const CODIGOS_HTTP = [
 ];
 
 export default function Home() {
-  const { productos, conectadoRealtime, cargando } = useRealtimeStock({ soloActivos: true });
+  const { productos, conectadoRealtime, cargando, error: errorStock } = useRealtimeStock({ soloActivos: true });
   const [latenciaMs, setLatenciaMs] = useState<number | null>(null);
+  const [errorLatencia, setErrorLatencia] = useState(false);
 
   const totalProductos = productos.length;
   const totalStock = productos.reduce((acc, p) => acc + (p.stock || 0), 0);
@@ -44,11 +45,18 @@ export default function Home() {
   useEffect(() => {
     const inicio = performance.now();
     fetch('/api/categorias')
-      .then(() => {
-        setLatenciaMs(Math.round(performance.now() - inicio));
+      .then((res) => {
+        if (res.ok) {
+          setLatenciaMs(Math.round(performance.now() - inicio));
+          setErrorLatencia(false);
+        } else {
+          setLatenciaMs(null);
+          setErrorLatencia(true);
+        }
       })
       .catch(() => {
         setLatenciaMs(null);
+        setErrorLatencia(true);
       });
   }, []);
 
@@ -96,7 +104,11 @@ export default function Home() {
               </span>
             </div>
             <span className="text-xs font-mono text-zinc-400">
-              {latenciaMs !== null ? `Latencia API: ${latenciaMs} ms` : 'Midiendo latencia...'}
+              {errorLatencia
+                ? 'API: No disponible'
+                : latenciaMs !== null
+                ? `Latencia API: ${latenciaMs} ms`
+                : 'Midiendo latencia...'}
             </span>
           </div>
 
@@ -125,7 +137,11 @@ export default function Home() {
             <div className="p-3 rounded-xl border border-black/[.06] dark:border-white/[.08] bg-zinc-50/50 dark:bg-zinc-950/50">
               <span className="text-[11px] text-zinc-400 block mb-1">Stock Activo en Vivo</span>
               <span className="text-zinc-800 dark:text-zinc-200 block font-medium">
-                {cargando ? '...' : `${totalProductos} medicamentos (${totalStock} unid.)`}
+                {cargando
+                  ? '...'
+                  : errorStock
+                  ? 'No disponible'
+                  : `${totalProductos} medicamentos (${totalStock} unid.)`}
               </span>
             </div>
           </div>
@@ -144,7 +160,7 @@ export default function Home() {
                   Cliente
                 </span>
                 <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400">
-                  {cargando ? '...' : `${totalProductos} productos`}
+                  {cargando ? '...' : errorStock ? 'Sin conexión' : `${totalProductos} productos`}
                 </span>
               </div>
               <h2 className="text-lg font-semibold tracking-tight mb-2 group-hover:text-black dark:group-hover:text-white">
