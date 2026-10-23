@@ -125,13 +125,17 @@ function ContenidoLogin() {
 
       sincronizarCookieParaMiddleware(authUser.$id, rol);
 
-      const destinoSeguro =
-        redirectParam &&
-        redirectParam.startsWith('/') &&
-        !redirectParam.startsWith('//') &&
-        !redirectParam.startsWith('/\\')
-          ? redirectParam
-          : null;
+      let destinoSeguro: string | null = null;
+      if (redirectParam && typeof window !== 'undefined') {
+        try {
+          const parsedUrl = new URL(redirectParam, window.location.origin);
+          if (parsedUrl.origin === window.location.origin && parsedUrl.pathname.startsWith('/')) {
+            destinoSeguro = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+          }
+        } catch {
+          destinoSeguro = null;
+        }
+      }
       if (destinoSeguro) {
         router.push(destinoSeguro);
       } else if (rol === 'admin') {
@@ -158,6 +162,14 @@ function ContenidoLogin() {
       // Ignorar
     }
     limpiarCookieDeMiddleware();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('farmacia_cart');
+        window.dispatchEvent(new Event('farmacia_cart_updated'));
+      } catch {
+        // Ignorar
+      }
+    }
     setUsuarioActivo(null);
   };
 
