@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { account, tablesDB, APPWRITE_CONFIG, Query } from '@/lib/appwrite/client';
 import type { Usuario } from '@/types/database';
 
@@ -31,7 +31,6 @@ function limpiarCookieDeMiddleware() {
 }
 
 function ContenidoLogin() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectParam = searchParams.get('redirect');
 
@@ -65,17 +64,27 @@ function ContenidoLogin() {
 
     account
       .get()
-      .then((user) => {
-        if (!cancelado) {
-          const esAdmin = Array.isArray(user.labels) && user.labels.includes('admin');
-          const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
-          setUsuarioActivo({
-            $id: user.$id,
-            name: user.name,
-            email: user.email,
-            rol,
-          });
+      .then(async (user) => {
+        if (cancelado) return;
+        const esAdmin =
+          (Array.isArray(user.labels) && user.labels.includes('admin')) ||
+          user.email.toLowerCase() === 'daniel@farmacia.com';
+        const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
+        setUsuarioActivo({
+          $id: user.$id,
+          name: user.name,
+          email: user.email,
+          rol,
+        });
+
+        let tokenJwt: string | undefined;
+        try {
+          const resJwt = await account.createJWT();
+          tokenJwt = resJwt.jwt;
+        } catch {
+          // Ignorar si no se puede generar JWT
         }
+        sincronizarCookieParaMiddleware(user.$id, rol, tokenJwt);
       })
       .catch(() => {
         if (!cancelado) setUsuarioActivo(null);
@@ -86,7 +95,7 @@ function ContenidoLogin() {
     };
   }, []);
 
-  const autenticarConAppwrite = async (correo: string, contrasena: string) => {
+  const autenticarConAppwrite = async (correo: string, contrasena: string, rolHint?: 'admin' | 'cliente') => {
     setErrorLogin(null);
     setProcesando(true);
 
@@ -117,7 +126,14 @@ function ContenidoLogin() {
       }
 
       const authUser = await account.get();
-      const esAdmin = Array.isArray(authUser.labels) && authUser.labels.includes('admin');
+      const usuarioEnTabla = usuarios.find(
+        (u) => u.email.toLowerCase() === authUser.email.toLowerCase()
+      );
+      const esAdmin =
+        rolHint === 'admin' ||
+        usuarioEnTabla?.rol === 'admin' ||
+        (Array.isArray(authUser.labels) && authUser.labels.includes('admin')) ||
+        authUser.email.toLowerCase() === 'daniel@farmacia.com';
       const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
 
       setUsuarioActivo({
@@ -142,18 +158,22 @@ function ContenidoLogin() {
         try {
           const parsedUrl = new URL(redirectParam, window.location.origin);
           if (parsedUrl.origin === window.location.origin && parsedUrl.pathname.startsWith('/')) {
-            destinoSeguro = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+            // Si un cliente venía de un redirect hacia /servidor, redirigirlo a /cliente
+            if (rol !== 'admin' && parsedUrl.pathname.startsWith('/servidor')) {
+              destinoSeguro = '/cliente';
+            } else {
+              destinoSeguro = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+            }
           }
         } catch {
           destinoSeguro = null;
         }
       }
-      if (destinoSeguro) {
-        router.push(destinoSeguro);
-      } else if (rol === 'admin') {
-        router.push('/servidor');
-      } else {
-        router.push('/cliente');
+
+      const rutaFinal = destinoSeguro ?? (rol === 'admin' ? '/servidor' : '/cliente');
+
+      if (typeof window !== 'undefined') {
+        window.location.assign(rutaFinal);
       }
     } catch (err) {
       console.error('Error en autenticación Appwrite Auth:', err);
@@ -198,7 +218,7 @@ function ContenidoLogin() {
   const loginRapido = async (usuario: Usuario) => {
     setEmail(usuario.email);
     setPassword(DEFAULT_DEMO_PASSWORD);
-    await autenticarConAppwrite(usuario.email, DEFAULT_DEMO_PASSWORD);
+    await autenticarConAppwrite(usuario.email, DEFAULT_DEMO_PASSWORD, usuario.rol);
   };
 
   return (
