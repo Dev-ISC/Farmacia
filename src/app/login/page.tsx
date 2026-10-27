@@ -14,20 +14,64 @@ interface SesionActivaInfo {
   rol: 'admin' | 'cliente';
 }
 
+function obtenerAtributoSecure(): string {
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return '; Secure';
+  }
+  return '';
+}
+
 function sincronizarCookieParaMiddleware(usuarioId: string, rol: 'admin' | 'cliente', jwt?: string) {
   if (typeof document === 'undefined') return;
-  document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax`;
-  document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax`;
+  const secureAttr = obtenerAtributoSecure();
+  document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax${secureAttr}`;
+  document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax${secureAttr}`;
   if (jwt) {
-    document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax`;
+    document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax${secureAttr}`;
   }
 }
 
 function limpiarCookieDeMiddleware() {
   if (typeof document === 'undefined') return;
-  document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
-  document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
-  document.cookie = 'farmacia_jwt=; path=/; max-age=0; SameSite=Lax';
+  const secureAttr = obtenerAtributoSecure();
+  document.cookie = `farmacia_session=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+  document.cookie = `farmacia_rol=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+  document.cookie = `farmacia_jwt=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+}
+
+/**
+ * Consulta autoritativa del rol del usuario en la tabla `Usuarios` de Appwrite
+ * filtrando por email (igual que `validar-admin.ts`), con respaldo de labels de Appwrite Auth.
+ */
+async function resolverRolUsuario(
+  email: string,
+  labels?: string[],
+  rolHint?: 'admin' | 'cliente'
+): Promise<'admin' | 'cliente'> {
+  if (rolHint === 'admin') return 'admin';
+
+  try {
+    const resultado = await tablesDB.listRows<Usuario>({
+      databaseId: APPWRITE_CONFIG.databaseId,
+      tableId: APPWRITE_CONFIG.tables.usuarios,
+      queries: [Query.equal('email', email), Query.limit(1)],
+    });
+
+    if (resultado.rows[0]?.rol === 'admin') {
+      return 'admin';
+    }
+    if (resultado.rows[0]?.rol === 'cliente') {
+      return 'cliente';
+    }
+  } catch {
+    // Fallback a labels de la cuenta de Appwrite si la consulta falla
+  }
+
+  if (Array.isArray(labels) && labels.includes('admin')) {
+    return 'admin';
+  }
+
+  return 'cliente';
 }
 
 function ContenidoLogin() {
@@ -66,10 +110,9 @@ function ContenidoLogin() {
       .get()
       .then(async (user) => {
         if (cancelado) return;
-        const esAdmin =
-          (Array.isArray(user.labels) && user.labels.includes('admin')) ||
-          user.email.toLowerCase() === 'daniel@farmacia.com';
-        const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
+        const rol = await resolverRolUsuario(user.email, user.labels);
+        if (cancelado) return;
+
         setUsuarioActivo({
           $id: user.$id,
           name: user.name,
@@ -84,7 +127,9 @@ function ContenidoLogin() {
         } catch {
           // Ignorar si no se puede generar JWT
         }
-        sincronizarCookieParaMiddleware(user.$id, rol, tokenJwt);
+        if (!cancelado) {
+          sincronizarCookieParaMiddleware(user.$id, rol, tokenJwt);
+        }
       })
       .catch(() => {
         if (!cancelado) setUsuarioActivo(null);
@@ -126,15 +171,7 @@ function ContenidoLogin() {
       }
 
       const authUser = await account.get();
-      const usuarioEnTabla = usuarios.find(
-        (u) => u.email.toLowerCase() === authUser.email.toLowerCase()
-      );
-      const esAdmin =
-        rolHint === 'admin' ||
-        usuarioEnTabla?.rol === 'admin' ||
-        (Array.isArray(authUser.labels) && authUser.labels.includes('admin')) ||
-        authUser.email.toLowerCase() === 'daniel@farmacia.com';
-      const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
+      const rol = await resolverRolUsuario(authUser.email, authUser.labels, rolHint);
 
       setUsuarioActivo({
         $id: authUser.$id,

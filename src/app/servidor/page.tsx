@@ -77,7 +77,11 @@ export default function PanelServidor() {
         setUsuario({ name: u.name, email: u.email });
         try {
           const { jwt } = await account.createJWT();
-          document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax`;
+          const secureAttr =
+            typeof window !== 'undefined' && window.location.protocol === 'https:'
+              ? '; Secure'
+              : '';
+          document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax${secureAttr}`;
         } catch {
           // Ignorar si no se puede generar JWT en este momento
         }
@@ -136,9 +140,13 @@ export default function PanelServidor() {
       // Ignorar si no había sesión en cliente
     }
     if (typeof document !== 'undefined') {
-      document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
-      document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
-      document.cookie = 'farmacia_jwt=; path=/; max-age=0; SameSite=Lax';
+      const secureAttr =
+        typeof window !== 'undefined' && window.location.protocol === 'https:'
+          ? '; Secure'
+          : '';
+      document.cookie = `farmacia_session=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+      document.cookie = `farmacia_rol=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+      document.cookie = `farmacia_jwt=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
       try {
         localStorage.removeItem('farmacia_cart');
         window.dispatchEvent(new Event('farmacia_cart_updated'));
@@ -153,7 +161,11 @@ export default function PanelServidor() {
   const asegurarJwt = async () => {
     try {
       const { jwt } = await account.createJWT();
-      document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax`;
+      const secureAttr =
+        typeof window !== 'undefined' && window.location.protocol === 'https:'
+          ? '; Secure'
+          : '';
+      document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax${secureAttr}`;
     } catch {
       // Ignorar si se usa cookie de sesión nativa
     }
@@ -304,10 +316,10 @@ export default function PanelServidor() {
       return;
     }
 
-    const stockMinimoParsed = parseInt(formCrear.stock_minimo, 10);
-    const stockMinimo = Number.isFinite(stockMinimoParsed) ? stockMinimoParsed : 5;
-    if (stockMinimo < 0) {
-      mostrarToast('error', 'El stock mínimo debe ser un número entero mayor o igual a 0.');
+    const stockMinimoRaw = formCrear.stock_minimo.trim();
+    const stockMinimo = stockMinimoRaw === '' ? 5 : Number(stockMinimoRaw);
+    if (!Number.isSafeInteger(stockMinimo) || stockMinimo < 0) {
+      mostrarToast('error', 'El stock mínimo debe ser un número entero seguro mayor o igual a 0.');
       return;
     }
 
