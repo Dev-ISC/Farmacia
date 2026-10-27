@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agents & ide
+.agents/
+testsprite_tests/
+testsprite_tests/tmp/
+testsprite_tests/tmp/config.json

@@ -145,6 +145,21 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        let stockMinimo = 5;
+        if (datos.stock_minimo !== undefined) {
+            if (
+                typeof datos.stock_minimo !== 'number' ||
+                !Number.isSafeInteger(datos.stock_minimo) ||
+                datos.stock_minimo < 0
+            ) {
+                return NextResponse.json(
+                    { error: 'Stock mínimo inválido' },
+                    { status: 400 }
+                );
+            }
+            stockMinimo = datos.stock_minimo;
+        }
+
         const producto = await tablesDB.createRow({
             databaseId: APPWRITE_CONFIG.databaseId,
             tableId: APPWRITE_CONFIG.tables.productos,
@@ -154,6 +169,7 @@ export async function POST(request: NextRequest) {
                 sku: sku.trim(),
                 precio,
                 stock,
+                stock_minimo: stockMinimo,
                 activo: true,
                 ...(datos.descripcion !== undefined && {
                     descripcion: datos.descripcion,

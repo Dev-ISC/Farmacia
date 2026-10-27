@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { account, tablesDB, APPWRITE_CONFIG, Query } from '@/lib/appwrite/client';
 import type { Usuario } from '@/types/database';
 
@@ -14,20 +14,67 @@ interface SesionActivaInfo {
   rol: 'admin' | 'cliente';
 }
 
-function sincronizarCookieParaMiddleware(usuarioId: string, rol: 'admin' | 'cliente') {
+function obtenerAtributoSecure(): string {
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return '; Secure';
+  }
+  return '';
+}
+
+function sincronizarCookieParaMiddleware(usuarioId: string, rol: 'admin' | 'cliente', jwt?: string) {
   if (typeof document === 'undefined') return;
-  document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax`;
-  document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax`;
+  const secureAttr = obtenerAtributoSecure();
+  document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax${secureAttr}`;
+  document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax${secureAttr}`;
+  if (jwt) {
+    document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax${secureAttr}`;
+  }
 }
 
 function limpiarCookieDeMiddleware() {
   if (typeof document === 'undefined') return;
-  document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
-  document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
+  const secureAttr = obtenerAtributoSecure();
+  document.cookie = `farmacia_session=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+  document.cookie = `farmacia_rol=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+  document.cookie = `farmacia_jwt=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
+}
+
+/**
+ * Consulta autoritativa del rol del usuario en la tabla `Usuarios` de Appwrite
+ * filtrando por email (igual que `validar-admin.ts`), con respaldo de labels de Appwrite Auth.
+ */
+async function resolverRolUsuario(
+  email: string,
+  labels?: string[],
+  rolHint?: 'admin' | 'cliente'
+): Promise<'admin' | 'cliente'> {
+  if (rolHint === 'admin') return 'admin';
+
+  try {
+    const resultado = await tablesDB.listRows<Usuario>({
+      databaseId: APPWRITE_CONFIG.databaseId,
+      tableId: APPWRITE_CONFIG.tables.usuarios,
+      queries: [Query.equal('email', email), Query.limit(1)],
+    });
+
+    if (resultado.rows[0]?.rol === 'admin') {
+      return 'admin';
+    }
+    if (resultado.rows[0]?.rol === 'cliente') {
+      return 'cliente';
+    }
+  } catch {
+    // Fallback a labels de la cuenta de Appwrite si la consulta falla
+  }
+
+  if (Array.isArray(labels) && labels.includes('admin')) {
+    return 'admin';
+  }
+
+  return 'cliente';
 }
 
 function ContenidoLogin() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectParam = searchParams.get('redirect');
 
@@ -61,16 +108,27 @@ function ContenidoLogin() {
 
     account
       .get()
-      .then((user) => {
+      .then(async (user) => {
+        if (cancelado) return;
+        const rol = await resolverRolUsuario(user.email, user.labels);
+        if (cancelado) return;
+
+        setUsuarioActivo({
+          $id: user.$id,
+          name: user.name,
+          email: user.email,
+          rol,
+        });
+
+        let tokenJwt: string | undefined;
+        try {
+          const resJwt = await account.createJWT();
+          tokenJwt = resJwt.jwt;
+        } catch {
+          // Ignorar si no se puede generar JWT
+        }
         if (!cancelado) {
-          const esAdmin = Array.isArray(user.labels) && user.labels.includes('admin');
-          const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
-          setUsuarioActivo({
-            $id: user.$id,
-            name: user.name,
-            email: user.email,
-            rol,
-          });
+          sincronizarCookieParaMiddleware(user.$id, rol, tokenJwt);
         }
       })
       .catch(() => {
@@ -82,7 +140,7 @@ function ContenidoLogin() {
     };
   }, []);
 
-  const autenticarConAppwrite = async (correo: string, contrasena: string) => {
+  const autenticarConAppwrite = async (correo: string, contrasena: string, rolHint?: 'admin' | 'cliente') => {
     setErrorLogin(null);
     setProcesando(true);
 
@@ -113,8 +171,7 @@ function ContenidoLogin() {
       }
 
       const authUser = await account.get();
-      const esAdmin = Array.isArray(authUser.labels) && authUser.labels.includes('admin');
-      const rol: 'admin' | 'cliente' = esAdmin ? 'admin' : 'cliente';
+      const rol = await resolverRolUsuario(authUser.email, authUser.labels, rolHint);
 
       setUsuarioActivo({
         $id: authUser.$id,
@@ -123,25 +180,37 @@ function ContenidoLogin() {
         rol,
       });
 
-      sincronizarCookieParaMiddleware(authUser.$id, rol);
+      let tokenJwt: string | undefined;
+      try {
+        const resJwt = await account.createJWT();
+        tokenJwt = resJwt.jwt;
+      } catch {
+        // Ignorar si no se puede generar JWT
+      }
+
+      sincronizarCookieParaMiddleware(authUser.$id, rol, tokenJwt);
 
       let destinoSeguro: string | null = null;
       if (redirectParam && typeof window !== 'undefined') {
         try {
           const parsedUrl = new URL(redirectParam, window.location.origin);
           if (parsedUrl.origin === window.location.origin && parsedUrl.pathname.startsWith('/')) {
-            destinoSeguro = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+            // Si un cliente venía de un redirect hacia /servidor, redirigirlo a /cliente
+            if (rol !== 'admin' && parsedUrl.pathname.startsWith('/servidor')) {
+              destinoSeguro = '/cliente';
+            } else {
+              destinoSeguro = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+            }
           }
         } catch {
           destinoSeguro = null;
         }
       }
-      if (destinoSeguro) {
-        router.push(destinoSeguro);
-      } else if (rol === 'admin') {
-        router.push('/servidor');
-      } else {
-        router.push('/cliente');
+
+      const rutaFinal = destinoSeguro ?? (rol === 'admin' ? '/servidor' : '/cliente');
+
+      if (typeof window !== 'undefined') {
+        window.location.assign(rutaFinal);
       }
     } catch (err) {
       console.error('Error en autenticación Appwrite Auth:', err);
@@ -186,7 +255,7 @@ function ContenidoLogin() {
   const loginRapido = async (usuario: Usuario) => {
     setEmail(usuario.email);
     setPassword(DEFAULT_DEMO_PASSWORD);
-    await autenticarConAppwrite(usuario.email, DEFAULT_DEMO_PASSWORD);
+    await autenticarConAppwrite(usuario.email, DEFAULT_DEMO_PASSWORD, usuario.rol);
   };
 
   return (

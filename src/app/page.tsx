@@ -152,6 +152,7 @@ export default function Home() {
           {/* Card 1: Tienda Cliente */}
           <Link
             href="/cliente"
+            prefetch={false}
             className="group rounded-2xl border border-black/[.08] dark:border-white/[.145] bg-white dark:bg-black p-6 flex flex-col justify-between transition-all hover:border-black/[.25] dark:hover:border-white/[.3]"
           >
             <div>

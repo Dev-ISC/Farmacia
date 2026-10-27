@@ -152,6 +152,18 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
     obtenerSnapshotServidor
   );
 
+  // Derivado reactivo: la confirmación de compra solo es visible si el carrito no tiene nuevos productos
+  const mostrarConfirmacion = compraConfirmada && itemsCarrito.length === 0 && Boolean(respuestaCompra?.ok);
+
+  // Cierre limpio del drawer purgando el estado de compra
+  const cerrarDrawer = () => {
+    setEstaAbierto(false);
+    if (compraConfirmada) {
+      setCompraConfirmada(false);
+      setRespuestaCompra(null);
+    }
+  };
+
   const { productos, stockPorId, cargando: cargandoStock } = useRealtimeStock({ soloActivos: true });
 
   // Cargar items de la base de datos de Appwrite y combinar con los locales
@@ -225,6 +237,10 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
   };
 
   const agregarProductoDemo = (producto: Producto) => {
+    if (compraConfirmada) {
+      setCompraConfirmada(false);
+      setRespuestaCompra(null);
+    }
     const existe = itemsCarrito.find((i) => i.productoId === producto.$id);
     let actualizados: EntradaCarritoItem[];
     if (existe) {
@@ -259,7 +275,7 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
   );
 
   const confirmarCompra = async () => {
-    if (comprando || compraConfirmada) return;
+    if (comprando || mostrarConfirmacion) return;
 
     const usuarioId = await obtenerUsuarioActualId();
     if (!usuarioId) {
@@ -292,6 +308,7 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
 
     setComprando(true);
     setRespuestaCompra(null);
+    setCompraConfirmada(false);
 
     try {
       const itemsPayload = itemsCarrito.map((item) => ({
@@ -330,7 +347,7 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
 
   const deshabilitarConfirmacion =
     comprando ||
-    compraConfirmada ||
+    mostrarConfirmacion ||
     cargandoStock ||
     cargandoCarrito ||
     itemsCarrito.length === 0 ||
@@ -338,14 +355,82 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
     !direccionEnvio.trim();
 
   // Contenido del Carrito (Estilo Vercel)
-  const cuerpoCarrito = (
+  const cuerpoCarrito = mostrarConfirmacion && respuestaCompra?.ok ? (
+    <div className="flex flex-col h-full justify-between py-2 space-y-6">
+      <div className="flex flex-col items-center text-center space-y-4 pt-4">
+        <div className="w-14 h-14 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-2xl font-bold shadow-xs">
+          ✓
+        </div>
+        <div>
+          <h3 className="text-xl font-semibold tracking-tight text-black dark:text-zinc-50">
+            ¡Compra procesada exitosamente!
+          </h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+            Tu pedido ha sido registrado en el sistema.
+          </p>
+        </div>
+
+        <div className="w-full p-4 rounded-2xl border border-black/[.08] dark:border-white/[.145] bg-black/[.02] dark:bg-white/[.04] text-left font-mono text-xs space-y-2">
+          <div className="flex justify-between items-center pb-2 border-b border-black/[.05] dark:border-white/[.08]">
+            <span className="text-zinc-500">Folio:</span>
+            <span className="font-semibold text-black dark:text-white">
+              {respuestaCompra.pedido.$id}
+            </span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-zinc-500">Total pagado:</span>
+            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+              ${respuestaCompra.pedido.total.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-zinc-500">Estado:</span>
+            <span className="uppercase text-zinc-700 dark:text-zinc-300 font-medium">
+              {respuestaCompra.pedido.estado}
+            </span>
+          </div>
+          {direccionEnvio && (
+            <div className="flex justify-between items-center pt-2 border-t border-black/[.05] dark:border-white/[.08]">
+              <span className="text-zinc-500">Dirección:</span>
+              <span className="truncate max-w-[180px] text-zinc-700 dark:text-zinc-300">
+                {direccionEnvio}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-black/[.08] dark:border-white/[.145]">
+        {modo === 'drawer' ? (
+          <button
+            type="button"
+            onClick={cerrarDrawer}
+            className="flex h-12 w-full cursor-pointer items-center justify-center rounded-full bg-black text-white hover:bg-[#383838] dark:bg-white dark:text-black dark:hover:bg-[#ccc] text-sm font-medium transition-colors"
+          >
+            Seguir Comprando
+          </button>
+        ) : (
+          <Link
+            href="/cliente"
+            onClick={() => {
+              setCompraConfirmada(false);
+              setRespuestaCompra(null);
+            }}
+            className="flex h-12 w-full cursor-pointer items-center justify-center rounded-full bg-black text-white hover:bg-[#383838] dark:bg-white dark:text-black dark:hover:bg-[#ccc] text-sm font-medium transition-colors"
+          >
+            &larr; Volver a la Tienda
+          </Link>
+        )}
+      </div>
+    </div>
+  ) : (
     <div className="flex flex-col h-full space-y-5">
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">
         {cargandoCarrito ? (
           <div className="text-center py-10 font-mono text-xs text-zinc-400">
             Cargando carrito...
           </div>
-        ) : itemsCarrito.length === 0 && !compraConfirmada ? (
+        ) : itemsCarrito.length === 0 && !mostrarConfirmacion ? (
           <div className="text-center py-12 border border-dashed border-black/[.08] dark:border-white/[.145] rounded-2xl p-6">
             <p className="text-sm text-zinc-500 mb-4">No hay productos en tu carrito.</p>
             {productos.length > 0 && (
@@ -431,7 +516,7 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
         )}
 
         {/* Campo de dirección */}
-        {itemsCarrito.length > 0 && !compraConfirmada && (
+        {itemsCarrito.length > 0 && !mostrarConfirmacion && (
           <div className="pt-2">
             <label className="block text-xs font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
               Dirección de entrega
@@ -446,24 +531,6 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
           </div>
         )}
 
-        {/* Respuesta 201: Recibo de compra exitosa */}
-        {respuestaCompra && respuestaCompra.ok && (
-          <div className="p-4 rounded-xl border border-black/[.08] dark:border-white/[.145] bg-black/[.02] dark:bg-white/[.04] text-xs font-mono space-y-1.5">
-            <div className="text-sm font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
-              {respuestaCompra.mensaje}
-            </div>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Folio: <strong className="text-black dark:text-white">{respuestaCompra.pedido.$id}</strong>
-            </p>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Total pagado: <strong className="text-black dark:text-white">${respuestaCompra.pedido.total.toFixed(2)}</strong>
-            </p>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Estado: <span className="uppercase">{respuestaCompra.pedido.estado}</span>
-            </p>
-          </div>
-        )}
-
         {/* Respuesta 409: Alerta de stock insuficiente */}
         {respuestaCompra && !respuestaCompra.ok && (
           <div className="p-4 rounded-xl border border-red-500/30 bg-red-500/[.05] text-xs font-mono text-red-600 dark:text-red-400 space-y-1">
@@ -475,7 +542,7 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
 
       {/* Pie con Total y Botón de Pago estilo Vercel */}
       <div className="pt-4 border-t border-black/[.08] dark:border-white/[.145] space-y-3">
-        {itemsCarrito.length > 0 && !compraConfirmada && (
+        {itemsCarrito.length > 0 && !mostrarConfirmacion && (
           <div className="flex justify-between items-center text-sm">
             <span className="text-zinc-600 dark:text-zinc-400">Total a pagar:</span>
             <span className="text-2xl font-semibold tracking-tight text-black dark:text-white font-mono">
@@ -484,33 +551,20 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
           </div>
         )}
 
-        {compraConfirmada ? (
-          <Link
-            href="/cliente"
-            onClick={() => {
-              setCompraConfirmada(false);
-              setRespuestaCompra(null);
-            }}
-            className="flex h-12 w-full cursor-pointer items-center justify-center rounded-full bg-black text-white hover:bg-[#383838] dark:bg-white dark:text-black dark:hover:bg-[#ccc] text-sm font-medium transition-colors"
-          >
-            &larr; Volver a la Tienda
-          </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={confirmarCompra}
-            disabled={deshabilitarConfirmacion}
-            className="flex h-12 w-full cursor-pointer items-center justify-center rounded-full bg-black text-white hover:bg-[#383838] dark:bg-white dark:text-black dark:hover:bg-[#ccc] text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {comprando
-              ? 'Procesando en servidor...'
-              : hayProductoSinStock
-              ? 'Stock Insuficiente'
-              : !direccionEnvio.trim() && itemsCarrito.length > 0
-              ? 'Ingresa tu dirección'
-              : 'Confirmar y Pagar'}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={confirmarCompra}
+          disabled={deshabilitarConfirmacion}
+          className="flex h-12 w-full cursor-pointer items-center justify-center rounded-full bg-black text-white hover:bg-[#383838] dark:bg-white dark:text-black dark:hover:bg-[#ccc] text-sm font-medium transition-colors disabled:opacity-50"
+        >
+          {comprando
+            ? 'Procesando en servidor...'
+            : hayProductoSinStock
+            ? 'Stock Insuficiente'
+            : !direccionEnvio.trim() && itemsCarrito.length > 0
+            ? 'Ingresa tu dirección'
+            : 'Confirmar y Pagar'}
+        </button>
       </div>
     </div>
   );
@@ -522,14 +576,18 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
         <div className="flex justify-between items-center pb-4 border-b border-black/[.08] dark:border-white/[.145] mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
-              Carrito de Compras
+              {mostrarConfirmacion ? 'Confirmación de Pedido' : 'Carrito de Compras'}
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-              Verifica tus productos y confirma tu pedido
+              {mostrarConfirmacion ? 'Recibo de tu compra realizada' : 'Verifica tus productos y confirma tu pedido'}
             </p>
           </div>
           <Link
             href="/cliente"
+            onClick={() => {
+              setCompraConfirmada(false);
+              setRespuestaCompra(null);
+            }}
             className="flex h-9 items-center justify-center rounded-full border border-solid border-black/[.08] dark:border-white/[.145] px-4 text-xs font-medium hover:bg-black/[.04] dark:hover:bg-[#1a1a1a] transition-colors"
           >
             &larr; Tienda
@@ -560,17 +618,17 @@ export default function InterfazCarrito({ modo = 'drawer' }: InterfazCarritoProp
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
             className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
-            onClick={() => setEstaAbierto(false)}
+            onClick={cerrarDrawer}
           />
 
           <div className="relative w-full max-w-md bg-white dark:bg-black border-l border-black/[.08] dark:border-white/[.145] h-full shadow-2xl p-6 sm:p-8 flex flex-col z-10">
             <div className="flex justify-between items-center pb-4 border-b border-black/[.08] dark:border-white/[.145] mb-6">
               <h2 className="text-lg font-semibold tracking-tight text-black dark:text-zinc-100">
-                Tu Carrito
+                {mostrarConfirmacion ? 'Confirmación' : 'Tu Carrito'}
               </h2>
               <button
                 type="button"
-                onClick={() => setEstaAbierto(false)}
+                onClick={cerrarDrawer}
                 className="text-zinc-400 hover:text-black dark:hover:text-white transition-colors cursor-pointer text-sm"
               >
                 ✕
