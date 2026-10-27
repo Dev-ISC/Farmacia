@@ -73,7 +73,15 @@ export default function PanelServidor() {
   useEffect(() => {
     account
       .get()
-      .then((u) => setUsuario({ name: u.name, email: u.email }))
+      .then(async (u) => {
+        setUsuario({ name: u.name, email: u.email });
+        try {
+          const { jwt } = await account.createJWT();
+          document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax`;
+        } catch {
+          // Ignorar si no se puede generar JWT en este momento
+        }
+      })
       .catch(() => {
         // Ignorar si middleware redirige
       });
@@ -141,9 +149,20 @@ export default function PanelServidor() {
     router.push('/login');
   };
 
+  // Renueva o asegura el token JWT antes de peticiones administrativas protegidas
+  const asegurarJwt = async () => {
+    try {
+      const { jwt } = await account.createJWT();
+      document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax`;
+    } catch {
+      // Ignorar si se usa cookie de sesión nativa
+    }
+  };
+
   // Activar medicamento inactivo con un solo clic
   const activarProducto = async (prod: Producto) => {
     try {
+      await asegurarJwt();
       const res = await fetch(`/api/productos/${prod.$id}`, {
         method: 'PATCH',
         credentials: 'include',
@@ -180,17 +199,36 @@ export default function PanelServidor() {
   // Guardar edición
   const guardarEdicion = async () => {
     if (!editando) return;
+
+    // Validación defensiva previa de datos numéricos y campos obligatorios
+    const nombreLimpio = formEditar.nombre.trim();
+    if (!nombreLimpio) {
+      mostrarToast('error', 'El nombre comercial no puede estar vacío.');
+      return;
+    }
+
+    const precioNum = parseFloat(formEditar.precio);
+    if (isNaN(precioNum) || precioNum < 0) {
+      mostrarToast('error', 'Ingresa un precio numérico válido mayor o igual a 0.');
+      return;
+    }
+
+    const stockNum = parseInt(formEditar.stock, 10);
+    if (isNaN(stockNum) || stockNum < 0) {
+      mostrarToast('error', 'Ingresa un stock entero válido mayor o igual a 0.');
+      return;
+    }
+
     setGuardando(true);
 
     try {
-      const precioNum = parseFloat(formEditar.precio);
-      const stockNum = parseInt(formEditar.stock, 10);
+      await asegurarJwt();
       const stockActual = stockPorId[editando.$id] ?? editando.stock;
 
       // 1. Datos generales editables: nombre, precio, descripcion, activo
       const cambiosGenerales: Record<string, unknown> = {};
-      if (formEditar.nombre.trim() && formEditar.nombre.trim() !== editando.nombre) {
-        cambiosGenerales.nombre = formEditar.nombre.trim();
+      if (nombreLimpio !== editando.nombre) {
+        cambiosGenerales.nombre = nombreLimpio;
       }
       if (precioNum !== editando.precio) {
         cambiosGenerales.precio = precioNum;
@@ -254,14 +292,27 @@ export default function PanelServidor() {
       return;
     }
 
+    const precioNum = parseFloat(formCrear.precio);
+    if (isNaN(precioNum) || precioNum < 0) {
+      mostrarToast('error', 'Ingresa un precio válido mayor o igual a 0.');
+      return;
+    }
+
+    const stockNum = parseInt(formCrear.stock, 10);
+    if (isNaN(stockNum) || stockNum < 0) {
+      mostrarToast('error', 'Ingresa un stock inicial entero mayor o igual a 0.');
+      return;
+    }
+
     setGuardandoCreacion(true);
 
     try {
+      await asegurarJwt();
       const payload = {
         nombre: formCrear.nombre.trim(),
         sku: formCrear.sku.trim(),
-        precio: parseFloat(formCrear.precio),
-        stock: parseInt(formCrear.stock, 10),
+        precio: precioNum,
+        stock: stockNum,
         stock_minimo: parseInt(formCrear.stock_minimo, 10) || 5,
         descripcion: formCrear.descripcion.trim() || undefined,
         categoria: formCrear.categoria.trim() || undefined,
@@ -463,7 +514,7 @@ export default function PanelServidor() {
             }`}
           >
             <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-              Poco Stock (&le; 5)
+              Poco Stock
             </span>
             <span className="text-2xl font-semibold font-mono tracking-tight text-amber-500">
               {metricas.pocoStock}
@@ -480,7 +531,7 @@ export default function PanelServidor() {
             }`}
           >
             <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-              Agotados (0)
+              Agotados
             </span>
             <span className="text-2xl font-semibold font-mono tracking-tight text-red-500">
               {metricas.agotados}
@@ -530,7 +581,13 @@ export default function PanelServidor() {
               onClick={() => setFiltroMetrica('todos')}
               className="h-10 px-4 rounded-full border border-dashed border-zinc-400 text-xs font-mono text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white transition-colors cursor-pointer"
             >
-              Filtro: {filtroMetrica} &times;
+              Filtro:{' '}
+              {filtroMetrica === 'conStock'
+                ? 'Con Stock'
+                : filtroMetrica === 'poco'
+                ? 'Poco Stock'
+                : 'Agotados'}{' '}
+              &times;
             </button>
           )}
         </div>
@@ -611,7 +668,7 @@ export default function PanelServidor() {
                         {inactivo ? (
                           <span className="text-zinc-500 dark:text-zinc-400 font-medium flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
-                            Inactivo
+                            Inactivo {agotado ? '· Agotado (0)' : `· Stock: ${stockActual}`}
                           </span>
                         ) : agotado ? (
                           <span className="text-red-500 font-medium flex items-center gap-1.5">

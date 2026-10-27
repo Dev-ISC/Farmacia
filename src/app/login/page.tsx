@@ -14,16 +14,20 @@ interface SesionActivaInfo {
   rol: 'admin' | 'cliente';
 }
 
-function sincronizarCookieParaMiddleware(usuarioId: string, rol: 'admin' | 'cliente') {
+function sincronizarCookieParaMiddleware(usuarioId: string, rol: 'admin' | 'cliente', jwt?: string) {
   if (typeof document === 'undefined') return;
   document.cookie = `farmacia_session=${encodeURIComponent(usuarioId)}; path=/; max-age=86400; SameSite=Lax`;
   document.cookie = `farmacia_rol=${encodeURIComponent(rol)}; path=/; max-age=86400; SameSite=Lax`;
+  if (jwt) {
+    document.cookie = `farmacia_jwt=${encodeURIComponent(jwt)}; path=/; max-age=900; SameSite=Lax`;
+  }
 }
 
 function limpiarCookieDeMiddleware() {
   if (typeof document === 'undefined') return;
   document.cookie = 'farmacia_session=; path=/; max-age=0; SameSite=Lax';
   document.cookie = 'farmacia_rol=; path=/; max-age=0; SameSite=Lax';
+  document.cookie = 'farmacia_jwt=; path=/; max-age=0; SameSite=Lax';
 }
 
 function ContenidoLogin() {
@@ -123,7 +127,15 @@ function ContenidoLogin() {
         rol,
       });
 
-      sincronizarCookieParaMiddleware(authUser.$id, rol);
+      let tokenJwt: string | undefined;
+      try {
+        const resJwt = await account.createJWT();
+        tokenJwt = resJwt.jwt;
+      } catch {
+        // Ignorar si no se puede generar JWT
+      }
+
+      sincronizarCookieParaMiddleware(authUser.$id, rol, tokenJwt);
 
       let destinoSeguro: string | null = null;
       if (redirectParam && typeof window !== 'undefined') {

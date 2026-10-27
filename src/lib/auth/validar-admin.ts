@@ -12,10 +12,9 @@ import type { Usuario } from '@/types/database';
  * Valida la identidad y los privilegios de un administrador antes de ejecutar
  * operaciones protegidas en los Route Handlers de Next.js.
  *
- * Estrategia de autenticación:
+ * Estrategia de autenticación criptográfica:
  * 1. Token JWT firmado por Appwrite (cookie `farmacia_jwt`).
- * 2. Secreto de sesión nativo de Appwrite (cookie `farmacia_session`, `appwrite-session` o `a_session_*`).
- * 3. Identificador de usuario registrado y activo en Appwrite Auth (cookie `farmacia_session`).
+ * 2. Secreto de sesión nativo de Appwrite (cookie `a_session_*`, `appwrite-session` o `farmacia_session`).
  *
  * Finalmente, verifica en la tabla `Usuarios` que el registro asociado posea `rol: 'admin'`.
  *
@@ -23,12 +22,15 @@ import type { Usuario } from '@/types/database';
  *          un `NextResponse` con código 401, 403 o 500 en caso contrario.
  */
 export async function validarAdmin(request: NextRequest): Promise<NextResponse | null> {
-    const sesion =
-        request.cookies.get('farmacia_session')?.value ||
-        request.cookies.get('appwrite-session')?.value ||
-        request.cookies.get(`a_session_${APPWRITE_CONFIG.projectId}`)?.value;
-
+    const projectId = APPWRITE_CONFIG.projectId;
     const jwtCookie = request.cookies.get('farmacia_jwt')?.value;
+
+    // Priorizar cookies de sesión nativas de Appwrite que contienen el secreto real de sesión
+    const sesion =
+        request.cookies.get(`a_session_${projectId}`)?.value ||
+        request.cookies.get(`a_session_${projectId}_legacy`)?.value ||
+        request.cookies.get('appwrite-session')?.value ||
+        request.cookies.get('farmacia_session')?.value;
 
     if (!sesion && !jwtCookie) {
         return NextResponse.json(
@@ -39,6 +41,7 @@ export async function validarAdmin(request: NextRequest): Promise<NextResponse |
 
     let email: string | null = null;
 
+    // 1. Verificación por Token JWT criptográfico firmado por Appwrite
     if (jwtCookie) {
         try {
             const client = new Client()
@@ -54,6 +57,7 @@ export async function validarAdmin(request: NextRequest): Promise<NextResponse |
         }
     }
 
+    // 2. Verificación por Secreto de Sesión nativo de Appwrite
     if (!email && sesion) {
         try {
             const { account } = createSessionClient(sesion);
@@ -68,32 +72,7 @@ export async function validarAdmin(request: NextRequest): Promise<NextResponse |
 
             email = cuenta.email;
         } catch {
-            // No es un token de sesión opaco de Appwrite
-        }
-    }
-
-    if (!email && sesion) {
-        try {
-            const { users } = createAdminClient();
-            const usuarioAuth = await users.get(sesion);
-
-            if (!usuarioAuth.status) {
-                return NextResponse.json(
-                    { error: 'Cuenta de usuario deshabilitada' },
-                    { status: 403 }
-                );
-            }
-
-            if (!usuarioAuth.emailVerification) {
-                return NextResponse.json(
-                    { error: 'Debes verificar tu correo' },
-                    { status: 403 }
-                );
-            }
-
-            email = usuarioAuth.email;
-        } catch {
-            // Identificador de usuario no encontrado en Auth
+            // Token de sesión no válido o expirado
         }
     }
 
