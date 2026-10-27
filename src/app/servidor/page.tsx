@@ -304,6 +304,13 @@ export default function PanelServidor() {
       return;
     }
 
+    const stockMinimoParsed = parseInt(formCrear.stock_minimo, 10);
+    const stockMinimo = Number.isFinite(stockMinimoParsed) ? stockMinimoParsed : 5;
+    if (stockMinimo < 0) {
+      mostrarToast('error', 'El stock mínimo debe ser un número entero mayor o igual a 0.');
+      return;
+    }
+
     setGuardandoCreacion(true);
 
     try {
@@ -313,7 +320,7 @@ export default function PanelServidor() {
         sku: formCrear.sku.trim(),
         precio: precioNum,
         stock: stockNum,
-        stock_minimo: parseInt(formCrear.stock_minimo, 10) || 5,
+        stock_minimo: stockMinimo,
         descripcion: formCrear.descripcion.trim() || undefined,
         categoria: formCrear.categoria.trim() || undefined,
         activo: true,
