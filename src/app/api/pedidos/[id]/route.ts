@@ -49,17 +49,25 @@ export async function GET(
             queries: [
                 Query.equal('pedidos_id', id),
                 Query.limit(100),
-                Query.select(['*', 'producto_id.nombre']),
+                Query.select(['*', 'producto_id.nombre', 'producto_id.stock']),
             ],
         });
 
-        const detalles = resultado.rows.map((detalle) => ({
-            id: detalle.$id,
-            producto: detalle.producto_id,
-            cantidad: detalle.cantidad,
-            precioUnitario: detalle.precio_unitario,
-            subtotal: detalle.cantidad * detalle.precio_unitario,
-        }));
+        const detalles = resultado.rows.map((detalle) => {
+            const prod = detalle.producto_id;
+            const productoObj = typeof prod === 'object' && prod !== null ? prod : null;
+            return {
+                id: detalle.$id,
+                producto: {
+                    id: productoObj?.$id ?? (typeof prod === 'string' ? prod : undefined),
+                    nombre: productoObj?.nombre ?? 'Medicamento',
+                    stock: productoObj?.stock,
+                },
+                cantidad: detalle.cantidad,
+                precioUnitario: detalle.precio_unitario,
+                subtotal: detalle.cantidad * detalle.precio_unitario,
+            };
+        });
 
         return NextResponse.json({
             pedido: {
