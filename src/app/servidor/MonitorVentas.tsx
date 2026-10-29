@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { account } from '@/lib/appwrite/client';
+import { account, client } from '@/lib/appwrite/client';
+import { APPWRITE_CONFIG } from '@/lib/appwrite/config';
 
 interface Pedido {
     $id?: string;
@@ -56,6 +57,31 @@ export default function MonitorVentas({ mostrarToast }: { mostrarToast: (tipo: '
         }
     };
 
+    // Suscripción en tiempo real a la tabla de Pedidos tal como lo indica AGENTS.md
+    useEffect(() => {
+        const cargar = async () => {
+            await cargarPedidos();
+        };
+        void cargar();
+
+        // Canal de tiempo real para la colección/tabla de pedidos en Appwrite
+        const channel = `databases.${APPWRITE_CONFIG.databaseId}.collections.${APPWRITE_CONFIG.tables.pedidos}.documents`;
+
+        const unsubscribe = client.subscribe(channel, (response) => {
+            // Cada vez que ocurra un evento (creación o actualización de un pedido), recargamos la lista al instante
+            if (
+                response.events.includes('databases.*.collections.*.documents.*.create') ||
+                response.events.includes('databases.*.collections.*.documents.*.update')
+            ) {
+                void cargarPedidos();
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, []);
+
     const verDetallesPedido = async (id: string) => {
         try {
             await asegurarJwt();
@@ -86,17 +112,10 @@ export default function MonitorVentas({ mostrarToast }: { mostrarToast: (tipo: '
         }
     };
 
-    useEffect(() => {
-        const cargar = async () => {
-            await cargarPedidos();
-        };
-        void cargar();
-    }, []);
-
     return (
         <>
             <div className="flex justify-end mb-4">
-                <button onClick={cargarPedidos} disabled={cargandoPedidos} className="flex h-10 items-center justify-center rounded-full border border-black/[.08] dark:border-white/[.145] hover:border-black dark:hover:border-white bg-white dark:bg-black px-5 text-sm font-medium transition-colors shadow-xs">
+                <button onClick={() => void cargarPedidos()} disabled={cargandoPedidos} className="flex h-10 items-center justify-center rounded-full border border-black/[.08] dark:border-white/[.145] hover:border-black dark:hover:border-white bg-white dark:bg-black px-5 text-sm font-medium transition-colors shadow-xs">
                     {cargandoPedidos ? 'Actualizando...' : 'Actualizar Ventas'}
                 </button>
             </div>
@@ -122,11 +141,11 @@ export default function MonitorVentas({ mostrarToast }: { mostrarToast: (tipo: '
                                 <td className="px-6 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-300">{(pedido.$id || pedido.id || '').slice(-8)}</td>
                                 <td className="px-6 py-4 font-semibold text-emerald-600 dark:text-emerald-400">${pedido.total?.toFixed(2)}</td>
                                 <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono uppercase border ${
-                        pedido.estado === 'pagado' ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900/50' :
-                            pedido.estado === 'cancelado' ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/50' :
-                                'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-800'
-                    }`}>{pedido.estado}</span>
+                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono uppercase border ${
+                                        pedido.estado === 'pagado' ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900/50' :
+                                            pedido.estado === 'cancelado' ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/50' :
+                                                'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-800'
+                                    }`}>{pedido.estado}</span>
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <button onClick={() => void verDetallesPedido(pedido.$id || pedido.id || '')} className="text-[11px] bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 rounded-full">Gestionar</button>
