@@ -486,12 +486,10 @@ export default function PanelServidor() {
                 <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
                   Panel Administrativo
                 </h1>
-                {tabActiva === 'inventario' && (
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${conectadoRealtime ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                      Inventario en vivo ({conectadoRealtime ? 'Conectado' : 'Reconectando'})
-                    </p>
-                )}
+                <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${conectadoRealtime ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                  {tabActiva === 'inventario' ? 'Inventario en vivo' : 'Ventas en vivo'} ({conectadoRealtime ? 'Conectado' : 'Reconectando'})
+                </p>
               </div>
 
               <div className="flex gap-6 mt-2">
@@ -789,7 +787,7 @@ export default function PanelServidor() {
 
           {/* --- COMPONENTE IMPORTADO DE VENTAS --- */}
           {tabActiva === 'ventas' && (
-              <MonitorVentas mostrarToast={mostrarToast} />
+              <MonitorVentas mostrarToast={mostrarToast} stockPorId={stockPorId} />
           )}
         </main>
 
