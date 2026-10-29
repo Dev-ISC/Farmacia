@@ -57,18 +57,16 @@ export default function MonitorVentas({ mostrarToast }: { mostrarToast: (tipo: '
         }
     };
 
-    // Suscripción en tiempo real a la tabla de Pedidos tal como lo indica AGENTS.md
+    // Suscripción en tiempo real a la tabla de Pedidos
     useEffect(() => {
         const cargar = async () => {
             await cargarPedidos();
         };
         void cargar();
 
-        // Canal de tiempo real para la colección/tabla de pedidos en Appwrite
         const channel = `databases.${APPWRITE_CONFIG.databaseId}.collections.${APPWRITE_CONFIG.tables.pedidos}.documents`;
 
         const unsubscribe = client.subscribe(channel, (response) => {
-            // Cada vez que ocurra un evento (creación o actualización de un pedido), recargamos la lista al instante
             if (
                 response.events.includes('databases.*.collections.*.documents.*.create') ||
                 response.events.includes('databases.*.collections.*.documents.*.update')
@@ -114,12 +112,6 @@ export default function MonitorVentas({ mostrarToast }: { mostrarToast: (tipo: '
 
     return (
         <>
-            <div className="flex justify-end mb-4">
-                <button onClick={() => void cargarPedidos()} disabled={cargandoPedidos} className="flex h-10 items-center justify-center rounded-full border border-black/[.08] dark:border-white/[.145] hover:border-black dark:hover:border-white bg-white dark:bg-black px-5 text-sm font-medium transition-colors shadow-xs">
-                    {cargandoPedidos ? 'Actualizando...' : 'Actualizar Ventas'}
-                </button>
-            </div>
-
             <div className="rounded-2xl border border-black/[.08] dark:border-white/[.145] bg-white dark:bg-black overflow-hidden shadow-xs">
                 <table className="w-full text-left text-sm">
                     <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400 text-xs font-mono uppercase tracking-wider border-b border-black/[.08] dark:border-white/[.145]">
